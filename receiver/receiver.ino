@@ -1,5 +1,5 @@
 /*
- * IRremoteESP8266: IRrecvDumpV3 - dump details of IR codes with IRrecv
+ * IRremoteESP8266: IRrecvDumpV2 - dump details of IR codes with IRrecv
  * An IR detector/demodulator must be connected to the input kRecvPin.
  *
  * Copyright 2009 Ken Shirriff, http://arcfn.com
@@ -11,9 +11,6 @@
  * Changes:
  *   Version 1.2 October, 2020
  *     - Enable easy setting of the decoding tolerance value.
- *   Version 1.1 May, 2020
- *     - Create DumpV3 from DumpV2
- *     - Add OTA Base
  *   Version 1.0 October, 2019
  *     - Internationalisation (i18n) support.
  *     - Stop displaying the legacy raw timing info.
@@ -28,10 +25,6 @@
  *       reduce the likelihood of miscaptures.
  * Based on Ken Shirriff's IrsendDemo Version 0.1 July, 2009,
  */
-
-// Allow over air update
-// #define OTA_ENABLE true
-#include "BaseOTA.h"
 
 #include <Arduino.h>
 #include <assert.h>
@@ -135,7 +128,6 @@ decode_results results;  // Somewhere to store the results
 
 // This section of code runs only once at start-up.
 void setup() {
-  OTAwifi();  // start default wifi (previously saved on the ESP) for OTA
 #if defined(ESP8266)
   Serial.begin(kBaudRate, SERIAL_8N1, SERIAL_TX_ONLY);
 #else  // ESP8266
@@ -148,7 +140,6 @@ void setup() {
   assert(irutils::lowLevelSanityCheck() == 0);
 
   Serial.printf("\n" D_STR_IRRECVDUMP_STARTUP "\n", kRecvPin);
-  OTAinit();  // setup OTA handlers and show IP
 #if DECODE_HASH
   // Ignore messages with less than minimum on or off pulses.
   irrecv.setUnknownThreshold(kMinUnknownSize);
@@ -161,9 +152,31 @@ void setup() {
 void loop() {
   // Check if the IR code has been received.
   if (irrecv.decode(&results)) {
+    // Display a crude timestamp.
+    uint32_t now = millis();
+    Serial.printf(D_STR_TIMESTAMP " : %06u.%03u\n", now / 1000, now % 1000);
+    // Check if we got an IR message that was to big for our capture buffer.
+    if (results.overflow)
+      Serial.printf(D_WARN_BUFFERFULL "\n", kCaptureBufferSize);
+    // Display the library version the message was captured with.
+    Serial.println(D_STR_LIBRARY "   : v" _IRREMOTEESP8266_VERSION_STR "\n");
+    // Display the tolerance percentage if it has been change from the default.
+    if (kTolerancePercentage != kTolerance)
+      Serial.printf(D_STR_TOLERANCE " : %d%%\n", kTolerancePercentage);
+    // Display the basic output of what we found.
+    Serial.print(resultToHumanReadableBasic(&results));
+    // Display any extra A/C info if we have it.
+    String description = IRAcUtils::resultAcToString(&results);
+    if (description.length()) Serial.println(D_STR_MESGDESC ": " + description);
+    yield();  // Feed the WDT as the text output can take a while to print.
+#if LEGACY_TIMING_INFO
+    // Output legacy RAW timing info of the result.
+    Serial.println(resultToTimingInfo(&results));
+    yield();  // Feed the WDT (again)
+#endif  // LEGACY_TIMING_INFO
+    // Output the results as source code
     Serial.println(resultToSourceCode(&results));
     Serial.println();    // Blank line between entries
     yield();             // Feed the WDT (again)
   }
-  OTAloopHandler();
 }
